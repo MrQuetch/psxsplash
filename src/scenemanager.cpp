@@ -915,6 +915,42 @@ void psxsplash::SceneManager::loadScene(psyqo::GPU& gpu, int sceneIndex, bool is
     // Restore CD-ROM controller and CPU IRQ state for file loading.
 #if defined(LOADER_CDROM)
     CDRomHelper::WakeDrive();
+
+    // CD-DA music keeps a CDRomDevice action active for the entire track (the
+    // drive reports position and the end-of-track IRQ through it).  While that
+    // action is pending, any blocking data read aborts with "readSectorsBlocking
+    // called with pending action".  So the drive must be brought to idle before
+    // loading any scene files — this must happen before the loading-screen read
+    // below.
+    //
+    // Getting there safely is fiddly.  The device exposes only isIdle()
+    // (state == 0), and psyqo's stopCDDA() accepts ONLY the steady PLAYING
+    // state (100): calling it during CD-DA's startup handshake, or while a
+    // pause/stop the scene's own Lua already issued is still draining, aborts
+    // with "stopCDDA called while not playing".  And MusicManager::isPlayingCDDA()
+    // can't be trusted alone: it's set from a deferred callback, so it lags the
+    // hardware.  So do it in two phases:
+    //   1. Pump until the drive settles into a definite state — either idle
+    //      (a startup that failed, or an in-flight pause/stop that finished) or
+    //      steady playback.  isPlayingCDDA() flips true from the callback that
+    //      fires exactly when the PLAYING state is entered, so it is a reliable
+    //      "safe to stop now" signal; combined with !isIdle() it means state==100.
+    //   2. If it settled on playing, stop it and drain back to idle.
+    // The per-scene Lua VM (which owns music state) is torn down in clearScene()
+    // and the next scene restarts its own track, so a full stop is correct.
+    {
+        psyqo::CDRomDevice* cdrom = static_cast<psxsplash::FileLoaderCDRom&>(
+            psxsplash::FileLoader::Get()).getCDRomDevice();
+        while (!cdrom->isIdle() && !m_music.isPlayingCDDA()) {
+            gpu.pumpCallbacks();
+        }
+        if (!cdrom->isIdle()) {
+            m_music.stopCDDA();
+            while (!cdrom->isIdle()) {
+                gpu.pumpCallbacks();
+            }
+        }
+    }
 #endif
 
     psyqo::Prim::FastFill ff(psyqo::Color{ .r = 0, .g = 0, .b = 0 });

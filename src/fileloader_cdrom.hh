@@ -104,30 +104,21 @@ class FileLoaderCDRom final : public FileLoader {
         const LoadProgressInfo* progress) override
     {
         outSize = 0;
-        if (!m_isoParser.initialized()) return nullptr;
+        if (!m_gpu) return nullptr;
 
-        // --- getDirentry (blocking via one-shot TaskQueue) ---
-        psyqo::ISO9660Parser::DirEntry entry;
-        bool found = false;
-
-        m_syncQueue
-            .startWith(m_isoParser.scheduleGetDirentry(filename, &entry))
-            .then([&found](psyqo::TaskQueue::Task* t) {
-                found = true;
-                t->resolve();
-            })
-            .butCatch([](psyqo::TaskQueue*) {})
-            .run();
-
-        while (m_syncQueue.isRunning()) {
-            m_gpu->pumpCallbacks();
-        }
-
-        if (!found || entry.type == psyqo::ISO9660Parser::DirEntry::INVALID)
-            return nullptr;
+        // Resolve the directory entry with BLOCKING reads.  The async
+        // ISO9660Parser::getDirentry issues a pump-driven readSectors whenever
+        // the path lives in a subdirectory (or a directory spanning >1 sector);
+        // that async read, interleaved with the blocking file reads below,
+        // leaves a CD IRQ in flight that lands in the next action's state
+        // machine and aborts ("ReadSectorsAction got CDROM acknowledge in wrong
+        // state").  resolveEntryBlocking keeps every CD access on the blocking
+        // path, exactly like the file reads.
+        uint32_t fileLBA = 0, fileSize = 0;
+        if (!resolveEntryBlocking(filename, fileLBA, fileSize)) return nullptr;
 
         // --- chunked sector read with progress ---
-        uint32_t totalSectors = (entry.size + 2047) / 2048;
+        uint32_t totalSectors = (fileSize + 2047) / 2048;
         uint8_t* buf = new uint8_t[totalSectors * 2048];
 
         static constexpr uint32_t kChunkSectors = 32;  // 64 KB per chunk
@@ -138,7 +129,7 @@ class FileLoaderCDRom final : public FileLoader {
             if (toRead > kChunkSectors) toRead = kChunkSectors;
 
             bool ok = m_cdrom.readSectorsBlocking(
-                entry.LBA + sectorsRead, toRead,
+                fileLBA + sectorsRead, toRead,
                 buf + sectorsRead * 2048, *m_gpu);
             if (!ok) {
                 delete[] buf;
@@ -155,7 +146,7 @@ class FileLoaderCDRom final : public FileLoader {
             }
         }
 
-        outSize = static_cast<int>(entry.size);
+        outSize = static_cast<int>(fileSize);
         return buf;
     }
 
@@ -165,42 +156,23 @@ class FileLoaderCDRom final : public FileLoader {
     // variant which spins on GPU callbacks.
     uint8_t* LoadFileSync(const char* filename, int& outSize) override {
         outSize = 0;
+        if (!m_gpu) return nullptr;
 
-        if (!m_isoParser.initialized()) return nullptr;
+        // Blocking directory resolution + blocking file read.  See the note in
+        // LoadFileSyncWithProgress for why the async parser is avoided here.
+        uint32_t fileLBA = 0, fileSize = 0;
+        if (!resolveEntryBlocking(filename, fileLBA, fileSize)) return nullptr;
 
-        // --- getDirentry (blocking via one-shot TaskQueue) ---
-        psyqo::ISO9660Parser::DirEntry entry;
-        bool found = false;
-
-        m_syncQueue
-            .startWith(m_isoParser.scheduleGetDirentry(filename, &entry))
-            .then([&found](psyqo::TaskQueue::Task* t) {
-                found = true;
-                t->resolve();
-            })
-            .butCatch([](psyqo::TaskQueue*) {})
-            .run();
-
-        // Spin until the queue finishes (GPU callbacks service the CD IRQs).
-        while (m_syncQueue.isRunning()) {
-            m_gpu->pumpCallbacks();
-        }
-
-        if (!found || entry.type == psyqo::ISO9660Parser::DirEntry::INVALID)
-            return nullptr;
-
-        // --- read sectors (blocking API) ---
-        uint32_t sectors = (entry.size + 2047) / 2048;
+        uint32_t sectors = (fileSize + 2047) / 2048;
         uint8_t* buf = new uint8_t[sectors * 2048];
 
-        bool ok = m_cdrom.readSectorsBlocking(
-            entry.LBA, sectors, buf, *m_gpu);
+        bool ok = m_cdrom.readSectorsBlocking(fileLBA, sectors, buf, *m_gpu);
         if (!ok) {
             delete[] buf;
             return nullptr;
         }
 
-        outSize = static_cast<int>(entry.size);
+        outSize = static_cast<int>(fileSize);
         return buf;
     }
 
@@ -215,8 +187,85 @@ class FileLoaderCDRom final : public FileLoader {
     psyqo::CDRomDevice* getCDRomDevice() { return &m_cdrom; }
 
   private:
+    // ── resolveEntryBlocking ─────────────────────────────────────
+    // Walks the ISO9660 directory tree to find `path`, using only the
+    // blocking readSectorsBlocking API.  This is a deliberate,
+    // self-contained replacement for psyqo's async ISO9660Parser::getDirentry
+    // in the synchronous load paths: getDirentry reads directory sectors
+    // asynchronously (pump-driven), and interleaving those with the blocking
+    // file reads desyncs the CD drive and aborts.  Doing the lookup blocking
+    // keeps the whole scene-load sequence on one consistent code path.
+    //
+    // `path` is an ISO path like "SCENE3/SCENE_3.VRM;1" (no leading slash;
+    // '/'-separated; file component carries the ";1" version suffix).  Returns
+    // false if any component is missing.  The PVD's root record is cached on
+    // first use; directory sectors are re-read per lookup (cheap: 1-2 sectors).
+    bool resolveEntryBlocking(const char* path, uint32_t& outLBA, uint32_t& outSize) {
+        if (!m_gpu) return false;
+
+        // Cache the root directory record from the Primary Volume Descriptor.
+        if (!m_haveRoot) {
+            if (!m_cdrom.readSectorsBlocking(16, 1, m_dirBuf, *m_gpu)) return false;
+            const uint8_t* r = m_dirBuf + 156;  // root DirRecord inside the PVD
+            m_rootLBA = readLE32(r + 2);
+            m_rootSize = readLE32(r + 10);
+            m_haveRoot = true;
+        }
+
+        uint32_t dirLBA = m_rootLBA;
+        uint32_t dirSize = m_rootSize;
+
+        for (const char* seg = path; *seg;) {
+            const char* end = seg;
+            while (*end && *end != '/') ++end;
+            const uint32_t segLen = static_cast<uint32_t>(end - seg);
+
+            bool found = false;
+            const uint32_t dirSectors = (dirSize + 2047) / 2048;
+            for (uint32_t s = 0; s < dirSectors && !found; ++s) {
+                if (!m_cdrom.readSectorsBlocking(dirLBA + s, 1, m_dirBuf, *m_gpu)) return false;
+
+                uint32_t off = 0;
+                while (off < 2048) {
+                    const uint8_t recLen = m_dirBuf[off];
+                    if (recLen == 0) break;  // rest of this sector is padding
+                    const uint8_t nameLen = m_dirBuf[off + 32];
+                    const uint8_t* nm = m_dirBuf + off + 33;
+                    // Skip the "." (0x00) and ".." (0x01) self/parent entries.
+                    const bool special = (nameLen == 1 && (nm[0] == 0 || nm[0] == 1));
+                    if (!special && nameLen == segLen &&
+                        __builtin_memcmp(nm, seg, segLen) == 0) {
+                        dirLBA = readLE32(m_dirBuf + off + 2);
+                        dirSize = readLE32(m_dirBuf + off + 10);
+                        found = true;
+                        break;
+                    }
+                    off += recLen;
+                }
+            }
+            if (!found) return false;
+
+            seg = end;
+            if (*seg == '/') ++seg;
+        }
+
+        outLBA = dirLBA;
+        outSize = dirSize;
+        return true;
+    }
+
+    static uint32_t readLE32(const uint8_t* p) {
+        return (uint32_t)p[0] | ((uint32_t)p[1] << 8) | ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+    }
+
     psyqo::CDRomDevice m_cdrom;
     psyqo::ISO9660Parser m_isoParser;
+
+    // Blocking-resolver state (see resolveEntryBlocking).
+    uint8_t m_dirBuf[2048];
+    bool m_haveRoot = false;
+    uint32_t m_rootLBA = 0;
+    uint32_t m_rootSize = 0;
 
     // Sub-queues (not nested in the parent queue's fixed_vector storage).
     psyqo::TaskQueue m_initQueue;
