@@ -30,8 +30,7 @@ src/musicmanager.cpp \
 src/skinmesh.cpp \
 src/loadbuffer_patch.cpp \
 src/memorycardmanager.cpp \
-src/luatableserializer.cpp \
-src/sjis.cpp
+src/luatableserializer.cpp
 
 # LOADER=cdrom  → CD-ROM backend (for ISO builds on real hardware)
 # LOADER=pcdrv  → PCdrv backend (default, emulator + SIO1)

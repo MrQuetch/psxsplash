@@ -6,6 +6,10 @@
 #include <psyqo/memory-card-filesystem.hh>
 #include <psyqo/memory-card.hh>
 
+namespace psyqo {
+class GPU;
+}
+
 namespace psxsplash {
 
 /**
@@ -41,8 +45,13 @@ class MemoryCardManager {
 
     static MemoryCardManager& Get();
 
-    /** Initialises the SIO0 bus. Call once from Application::prepare(). */
-    void prepare();
+    /**
+     * Initialises the SIO0 bus. Call once from Application::prepare().
+     *
+     * The GPU is retained so that the blocking card operations below can pump
+     * callbacks while they wait on the card, which psyqo requires.
+     */
+    void prepare(psyqo::GPU& gpu);
 
     /** Applies a configuration parsed from a splashpack. */
     void setConfig(const MemoryCardConfig& config);
@@ -84,6 +93,7 @@ class MemoryCardManager {
   private:
     MemoryCardManager() = default;
 
+    psyqo::GPU* m_gpu = nullptr;
     psyqo::MemoryCard m_card;
     psyqo::MemoryCardFileSystem m_fs{m_card};
     MemoryCardConfig m_config;

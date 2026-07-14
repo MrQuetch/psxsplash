@@ -1,7 +1,8 @@
 #include "memorycardmanager.hh"
 
+#include <psyqo/gpu.hh>
+
 #include "luatableserializer.hh"
-#include "sjis.hh"
 
 namespace psxsplash {
 
@@ -14,7 +15,10 @@ MemoryCardManager& MemoryCardManager::Get() {
     return instance;
 }
 
-void MemoryCardManager::prepare() { m_card.prepare(); }
+void MemoryCardManager::prepare(psyqo::GPU& gpu) {
+    m_gpu = &gpu;
+    m_card.prepare();
+}
 
 void MemoryCardManager::setConfig(const MemoryCardConfig& config) { m_config = config; }
 
@@ -55,7 +59,7 @@ const char* MemoryCardManager::isPresent(Port port, bool* outPresent) {
 }
 
 const char* MemoryCardManager::format(Port port) {
-    psyqo::MemoryCard::Error error = m_fs.format(port);
+    psyqo::MemoryCard::Error error = m_fs.formatBlocking(*m_gpu, port);
     if (error != psyqo::MemoryCard::Error::OK) return psyqo::MemoryCard::errorMessage(error);
     return nullptr;
 }
@@ -68,13 +72,15 @@ const char* MemoryCardManager::save(Port port, const char* key, const char* titl
         return serError ? serError : "failed to serialize save data";
     }
 
-    uint8_t title[64];
-    asciiToSjisTitle(titleOrNull ? titleOrNull : m_config.titlePrefix, title);
+    // psyqo encodes the BIOS save title to Shift-JIS itself, so hand it the
+    // plain string rather than pre-encoding.
+    const char* title = titleOrNull ? titleOrNull : m_config.titlePrefix;
 
     char filename[21];
     buildFilename(key, filename);
 
-    psyqo::MemoryCard::Error error = m_fs.writeFile(port, filename, title, m_config.icon, s_buffer, size);
+    psyqo::MemoryCard::Error error =
+        m_fs.writeFileBlocking(*m_gpu, port, filename, title, m_config.icon, s_buffer, size);
     if (error != psyqo::MemoryCard::Error::OK) return psyqo::MemoryCard::errorMessage(error);
     return nullptr;
 }
@@ -84,7 +90,8 @@ const char* MemoryCardManager::load(Port port, const char* key, psyqo::Lua& lua)
     buildFilename(key, filename);
 
     uint32_t length = 0;
-    psyqo::MemoryCard::Error error = m_fs.readFile(port, filename, s_buffer, sizeof(s_buffer), &length);
+    psyqo::MemoryCard::Error error =
+        m_fs.readFileBlocking(*m_gpu, port, filename, s_buffer, sizeof(s_buffer), &length);
     if (error != psyqo::MemoryCard::Error::OK) return psyqo::MemoryCard::errorMessage(error);
 
     const char* deError = nullptr;
@@ -97,20 +104,20 @@ const char* MemoryCardManager::load(Port port, const char* key, psyqo::Lua& lua)
 const char* MemoryCardManager::remove(Port port, const char* key) {
     char filename[21];
     buildFilename(key, filename);
-    psyqo::MemoryCard::Error error = m_fs.deleteFile(port, filename);
+    psyqo::MemoryCard::Error error = m_fs.deleteFileBlocking(*m_gpu, port, filename);
     if (error != psyqo::MemoryCard::Error::OK) return psyqo::MemoryCard::errorMessage(error);
     return nullptr;
 }
 
 const char* MemoryCardManager::freeBlocks(Port port, uint32_t* outBlocks) {
-    psyqo::MemoryCard::Error error = m_fs.getFreeBlockCount(port, outBlocks);
+    psyqo::MemoryCard::Error error = m_fs.getFreeBlockCountBlocking(*m_gpu, port, outBlocks);
     if (error != psyqo::MemoryCard::Error::OK) return psyqo::MemoryCard::errorMessage(error);
     return nullptr;
 }
 
 const char* MemoryCardManager::listFiles(Port port, psyqo::MemoryCardFileSystem::FileEntry* out, uint32_t maxEntries,
                                          uint32_t* outCount) {
-    psyqo::MemoryCard::Error error = m_fs.listFiles(port, out, maxEntries, outCount);
+    psyqo::MemoryCard::Error error = m_fs.listFilesBlocking(*m_gpu, port, out, maxEntries, outCount);
     if (error != psyqo::MemoryCard::Error::OK) return psyqo::MemoryCard::errorMessage(error);
     return nullptr;
 }

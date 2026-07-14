@@ -69,7 +69,7 @@ void PSXSplash::prepare() {
     psxsplash::FileLoader::Get().prepare();
 
     // Bring up the SIO0 bus for memory card access.
-    psxsplash::MemoryCardManager::Get().prepare();
+    psxsplash::MemoryCardManager::Get().prepare(gpu());
 
 #if defined(LOADER_CDROM)
     // The CD-ROM backend needs a GPU pointer for LoadFileSync's spin loop.
