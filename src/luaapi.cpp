@@ -2698,7 +2698,7 @@ int LuaAPI::MemCard_IsPresent(lua_State* L) {
     const char* err = MemoryCardManager::Get().isPresent(port, &present);
     if (err) {
         lua.push(false);
-        lua.push(err);
+        lua.push(eastl::string_view(err));
         return 2;
     }
     lua.push(present);
@@ -2714,7 +2714,7 @@ int LuaAPI::MemCard_Format(lua_State* L) {
     const char* err = MemoryCardManager::Get().format(port);
     if (err) {
         lua.push(false);
-        lua.push(err);
+        lua.push(eastl::string_view(err));
         return 2;
     }
     lua.push(true);
@@ -2743,7 +2743,7 @@ int LuaAPI::MemCard_Save(lua_State* L) {
     const char* err = MemoryCardManager::Get().save(port, key, title, lua, 3);
     if (err) {
         lua.push(false);
-        lua.push(err);
+        lua.push(eastl::string_view(err));
         return 2;
     }
     lua.push(true);
@@ -2768,7 +2768,7 @@ int LuaAPI::MemCard_Load(lua_State* L) {
     if (err) {
         lua.setTop(top);  // discard any partially-pushed values
         lua.push();
-        lua.push(err);
+        lua.push(eastl::string_view(err));
         return 2;
     }
     // On success the loaded value sits on top of the stack.
@@ -2790,7 +2790,7 @@ int LuaAPI::MemCard_Delete(lua_State* L) {
     const char* err = MemoryCardManager::Get().remove(port, key);
     if (err) {
         lua.push(false);
-        lua.push(err);
+        lua.push(eastl::string_view(err));
         return 2;
     }
     lua.push(true);
@@ -2808,14 +2808,14 @@ int LuaAPI::MemCard_List(lua_State* L) {
     const char* err = MemoryCardManager::Get().listFiles(port, entries, 15, &count);
     if (err) {
         lua.push();
-        lua.push(err);
+        lua.push(eastl::string_view(err));
         return 2;
     }
     lua.newTable();
     int table = lua.getTop();
     uint32_t shown = count < 15 ? count : 15;
     for (uint32_t i = 0; i < shown; i++) {
-        lua.push(entries[i].name);
+        lua.push(eastl::string_view(entries[i].name));
         lua.rawSetI(table, static_cast<int>(i + 1));
     }
     lua.push();  // nil error
@@ -2831,7 +2831,7 @@ int LuaAPI::MemCard_FreeBlocks(lua_State* L) {
     const char* err = MemoryCardManager::Get().freeBlocks(port, &blocks);
     if (err) {
         lua.push();
-        lua.push(err);
+        lua.push(eastl::string_view(err));
         return 2;
     }
     lua.pushNumber(static_cast<lua_Number>(blocks));
