@@ -6,6 +6,27 @@
 
 namespace psxsplash {
 
+/**
+ * Stack-safe replacement for psyqo::Lua::isFixedPoint().
+ *
+ * psyqo-lua's isFixedPoint() probes the value's metatable with
+ * lua_getmetatable, which pushes nothing when the value has no metatable, yet
+ * it unconditionally pop(2)s afterwards. Called on a table that has no
+ * metatable (e.g. an ordinary nested save table) it therefore underflows the
+ * Lua stack and discards the value being examined -- the following lua_type()
+ * then reads past the top and reports the value as unsupported userdata.
+ *
+ * A FixedPoint is always a table carrying the psyqo.FixedPoint metatable, so we
+ * only delegate to isFixedPoint() once a metatable is known to be present,
+ * which is the case where it is stack-balanced.
+ */
+inline bool IsFixedPointSafe(psyqo::Lua& lua, int idx) {
+    if (!lua.isTable(idx)) return false;
+    if (lua.getMetatable(idx) == 0) return false;  // no metatable -> not a FixedPoint
+    lua.pop(1);                                     // drop the metatable pushed by the probe
+    return lua.isFixedPoint(idx);
+}
+
 class SceneManager;  // Forward declaration
 class CutscenePlayer;  // Forward declaration
 class AnimationPlayer;  // Forward declaration

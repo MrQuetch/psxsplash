@@ -2,6 +2,8 @@
 
 #include <psyqo/fixed-point.hh>
 
+#include "luaapi.hh"  // IsFixedPointSafe
+
 namespace psxsplash {
 
 namespace {
@@ -132,8 +134,9 @@ bool writeTable(psyqo::Lua& lua, int idx, Writer& w, int depth, const char** out
 }
 
 bool writeValue(psyqo::Lua& lua, int idx, Writer& w, int depth, const char** outError) {
-    // FixedPoint is userdata, so test it before the generic type switch.
-    if (lua.isFixedPoint(idx)) {
+    // FixedPoint is a Lua table carrying the psyqo.FixedPoint metatable, so it
+    // must be recognised before the generic table case below.
+    if (IsFixedPointSafe(lua, idx)) {
         w.u8(TAG_FIXEDPOINT);
         w.u32(static_cast<uint32_t>(lua.toFixedPoint(idx).raw()));
         return true;

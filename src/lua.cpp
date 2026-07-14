@@ -9,6 +9,7 @@
 
 #include "gameobject.hh"
 #include "gtemath.hh"
+#include "luaapi.hh"  // IsFixedPointSafe
 
 // OOM-guarded allocator for Lua. The linker redirects luaI_realloc
 // here instead of straight to psyqo_realloc, so we can log before
@@ -31,7 +32,7 @@ static constexpr int32_t kFixedScale = 4096;
 
 // Accept FixedPoint object or plain number from Lua
 static psyqo::FixedPoint<12> readFP(psyqo::Lua& L, int idx) {
-    if (L.isFixedPoint(idx)) return L.toFixedPoint(idx);
+    if (psxsplash::IsFixedPointSafe(L, idx)) return L.toFixedPoint(idx);
     return psyqo::FixedPoint<12>(static_cast<int32_t>(L.toNumber(idx) * kFixedScale), psyqo::FixedPoint<12>::RAW);
 }
 
@@ -256,7 +257,7 @@ void psxsplash::Lua::Init() {
             char buf[64];
             int len = 0;
             for (int i = 1; i <= 2; i++) {
-                if (L.isFixedPoint(i)) {
+                if (psxsplash::IsFixedPointSafe(L, i)) {
                     auto fp = L.toFixedPoint(i);
                     int32_t raw = fp.raw();
                     int integer = raw / 4096;

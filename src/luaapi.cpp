@@ -34,7 +34,7 @@ static constexpr lua_Number kFixedScale = 4096;
 // Read a FixedPoint<12> from the stack, accepting either a FixedPoint object
 // or a plain integer (which gets scaled by 4096 to become fp12).
 static psyqo::FixedPoint<12> readFP(psyqo::Lua& L, int idx) {
-    if (L.isFixedPoint(idx)) {
+    if (IsFixedPointSafe(L, idx)) {
         return L.toFixedPoint(idx);
     }
     return psyqo::FixedPoint<12>(static_cast<int32_t>(L.toNumber(idx) * kFixedScale), psyqo::FixedPoint<12>::RAW);
@@ -2282,7 +2282,7 @@ int LuaAPI::Convert_IntToFp(lua_State* L) {
 int LuaAPI::Convert_FpToInt(lua_State* L) {
     psyqo::Lua lua(L);
     
-    if (!lua.isFixedPoint(1)) { 
+    if (!IsFixedPointSafe(lua, 1)) {
         return 0;
     }
 
