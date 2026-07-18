@@ -85,7 +85,7 @@ void LuaAPI::RegisterAll(psyqo::Lua& L, SceneManager* scene, CutscenePlayer* cut
     
     L.push(Entity_GetRotationY);
     L.setField(-2, "GetRotationY");
-    
+
     L.push(Entity_SetRotationY);
     L.setField(-2, "SetRotationY");
 
@@ -133,6 +133,12 @@ void LuaAPI::RegisterAll(psyqo::Lua& L, SceneManager* scene, CutscenePlayer* cut
 
     L.push(Entity_SetParent);
     L.setField(-2, "SetParent");
+
+    L.push(Entity_GetPolyCount);
+    L.setField(-2, "GetPolyCount");
+
+    L.push(Entity_GetPolyVertex);
+    L.setField(-2, "GetPolyVertex");
 
     L.setGlobal("Entity");
     
@@ -584,6 +590,24 @@ void LuaAPI::RegisterAll(psyqo::Lua& L, SceneManager* scene, CutscenePlayer* cut
 
     L.push(UI_GetSize);
     L.setField(-2, "GetSize");
+
+    L.push(UI_SetImageUVs);
+    L.setField(-2, "SetImageUVs");
+
+    L.push(UI_GetImageUVs);
+    L.setField(-2, "GetImageUVs");
+
+    L.push(UI_SetImageTexpage);
+    L.setField(-2, "SetImageTexpage");
+
+    L.push(UI_GetImageTexpage);
+    L.setField(-2, "GetImageTexpage");
+
+    L.push(UI_SetImageClut);
+    L.setField(-2, "SetImageClut");
+
+    L.push(UI_GetImageClut);
+    L.setField(-2, "GetImageClut");
 
     L.push(UI_SetProgressColors);
     L.setField(-2, "SetProgressColors");
@@ -1299,6 +1323,98 @@ int LuaAPI::Entity_SetParent(lua_State* L)
     goChild->rotation = goParent->rotation;
 
     return 0;
+}
+
+int LuaAPI::Entity_GetPolyCount(lua_State* L) {
+    psyqo::Lua lua(L);
+
+    if (!lua.isTable(1))
+    {
+        return 0;
+    }
+
+    lua.getField(1, "__cpp_ptr");
+    auto go = lua.toUserdata<GameObject>(-1);
+    lua.pop();
+
+    if (!go) return 0;
+
+    lua.pushNumber(go->polyCount);
+
+    return 1;
+}
+
+int LuaAPI::Entity_GetPolyVertex(lua_State* L) {
+	psyqo::Lua lua(L);
+
+	if (!lua.isTable(1) || !lua.isNumber(2) || !lua.isNumber(3))
+	{
+		return 0;
+	}
+
+	lua.getField(1, "__cpp_ptr");
+	auto go = lua.toUserdata<GameObject>(-1);
+	lua.pop();
+
+	int polyIndex = (int)lua.toNumber(2);
+    int vertIndex = (int)lua.toNumber(3);
+
+	if (!go) return 0;
+
+	// Check if polyIndex is in range
+	if (polyIndex < 0 || polyIndex >= go->polyCount)
+		return 0;
+
+	// Get the poly index
+    const auto& poly = go->polygons[polyIndex];
+    psyqo::Vec3 vec;
+    psyqo::Vec3 rotated;
+
+    // Get the correct vertex from the poly
+    switch (vertIndex)
+    {
+    case 0:
+        vec = poly.v0;
+        break;
+
+    case 1:
+        vec = poly.v1;
+        break;
+
+    case 2:
+        vec = poly.v2;
+        break;
+
+    default:
+        return 0;
+    }
+
+    // Get the object's rotation
+    rotated.x =
+        go->rotation.vs[0].x * vec.x +
+        go->rotation.vs[0].y * vec.y +
+        go->rotation.vs[0].z * vec.z;
+
+    rotated.y =
+        go->rotation.vs[1].x * vec.x +
+        go->rotation.vs[1].y * vec.y +
+        go->rotation.vs[1].z * vec.z;
+
+    rotated.z =
+        go->rotation.vs[2].x * vec.x +
+        go->rotation.vs[2].y * vec.y +
+        go->rotation.vs[2].z * vec.z;
+
+    // Get the object's position
+    rotated.x += go->position.x;
+    rotated.y += go->position.y;
+    rotated.z += go->position.z;
+
+    lua.push(rotated.x);
+    lua.push(rotated.y);
+    lua.push(rotated.z);
+
+    return 3;
 }
 
 // ============================================================================
@@ -3360,6 +3476,99 @@ int LuaAPI::UI_GetSize(lua_State* L) {
     s_uiSystem->getSize(handle, w, h);
     lua.pushNumber(static_cast<lua_Number>(w));
     lua.pushNumber(static_cast<lua_Number>(h));
+    return 2;
+}
+
+// parameters: UI_SetImageUVs(handle, u0, v0, u1, v1)
+int LuaAPI::UI_SetImageUVs(lua_State* L) {
+    psyqo::Lua lua(L);
+    if (!s_uiSystem || !lua.isNumber(1)) return 0;
+    int handle = static_cast<int>(lua.toNumber(1));
+    uint8_t u0 = static_cast<uint8_t>(lua.toNumber(2));
+    uint8_t v0 = static_cast<uint8_t>(lua.toNumber(3));
+    uint8_t u1 = static_cast<uint8_t>(lua.toNumber(4));
+    uint8_t v1 = static_cast<uint8_t>(lua.toNumber(5));
+
+    s_uiSystem->setImageUVs(handle, u0, v0, u1, v1);
+
+    return 0;
+}
+
+// example usage: u0, v0, u1, v1 = UI_GetImageUVs(handle)
+int LuaAPI::UI_GetImageUVs(lua_State* L) {
+    psyqo::Lua lua(L);
+    if (!s_uiSystem || !lua.isNumber(1)) {
+        lua.pushNumber(0); lua.pushNumber(0);
+        lua.pushNumber(0); lua.pushNumber(0);
+        return 4;
+    }
+    int handle = static_cast<int>(lua.toNumber(1));
+    uint8_t  u0, v0, u1, v1;
+
+    s_uiSystem->getImageUVs(handle, u0, v0, u1, v1);
+    lua.pushNumber(static_cast<lua_Number>(u0));
+    lua.pushNumber(static_cast<lua_Number>(v0));
+    lua.pushNumber(static_cast<lua_Number>(u1));
+    lua.pushNumber(static_cast<lua_Number>(v1));
+    return 4;
+}
+
+// parameters: UI_SetImageTexpage(handle, texpageX, texpageY)
+int LuaAPI::UI_SetImageTexpage(lua_State* L) {
+    psyqo::Lua lua(L);
+    if (!s_uiSystem || !lua.isNumber(1)) return 0;
+    int handle = static_cast<int>(lua.toNumber(1));
+    uint8_t texpageX = static_cast<uint8_t>(lua.toNumber(2));
+    uint8_t texpageY = static_cast<uint8_t>(lua.toNumber(3));
+
+    s_uiSystem->setImageTexpage(handle, texpageX, texpageY);
+
+    return 0;
+}
+
+// example usage: texpageX, texpageY = UI_GetImageTexpage(handle)
+int LuaAPI::UI_GetImageTexpage(lua_State* L) {
+    psyqo::Lua lua(L);
+    if (!s_uiSystem || !lua.isNumber(1)) {
+        lua.pushNumber(0); lua.pushNumber(0);
+        return 2;
+    }
+    int handle = static_cast<int>(lua.toNumber(1));
+    uint8_t texpageX, texpageY;
+
+    s_uiSystem->getImageTexpage(handle, texpageX, texpageY);
+    lua.pushNumber(static_cast<lua_Number>(texpageX));
+    lua.pushNumber(static_cast<lua_Number>(texpageY));
+    return 2;
+}
+
+// parameters: UI_SetImageClut(handle, clutX, clutY)
+int LuaAPI::UI_SetImageClut(lua_State* L) {
+    psyqo::Lua lua(L);
+    if (!s_uiSystem || !lua.isNumber(1)) return 0;
+    int handle = static_cast<int>(lua.toNumber(1));
+    uint16_t clutX = static_cast<uint16_t>(lua.toNumber(2));
+    uint16_t clutY = static_cast<uint16_t>(lua.toNumber(3));
+
+    s_uiSystem->setImageClut(handle, clutX, clutY);
+
+    return 0;
+}
+
+// example usage: clutX, clutY = UI_GetImageClut(handle)
+int LuaAPI::UI_GetImageClut(lua_State* L) {
+    psyqo::Lua lua(L);
+    if (!s_uiSystem || !lua.isNumber(1)) {
+        lua.pushNumber(0);
+        lua.pushNumber(0);
+        return 2;
+    }
+    int handle = static_cast<int>(lua.toNumber(1));
+    uint16_t clutX, clutY;
+
+    s_uiSystem->getImageClut(handle, clutX, clutY);
+    lua.pushNumber(static_cast<lua_Number>(clutX));
+    lua.pushNumber(static_cast<lua_Number>(clutY));
     return 2;
 }
 
