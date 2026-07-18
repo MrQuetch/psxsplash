@@ -103,7 +103,7 @@ private:
     
     // Entity.GetRotationY(object) -> number (radians)
     static int Entity_GetRotationY(lua_State* L);
-    
+
     // Entity.SetRotationY(object, angle) -> nil
     static int Entity_SetRotationY(lua_State* L);
 
@@ -152,6 +152,12 @@ private:
 
     // Entity.SetParent(parent object, child object, Vec3 offset)
     static int Entity_SetParent(lua_State* L);
+
+    // Entity.GetPolyCount(object)
+    static int Entity_GetPolyCount(lua_State* L);
+
+    // Entity.GetPolyVertex(object, poly index, vertex index)
+    static int Entity_GetPolyVertex(lua_State* L);
 
     // ========================================================================
     // VEC3 API - Vector math
@@ -510,6 +516,12 @@ private:
     static int UI_GetPosition(lua_State* L);
     static int UI_SetSize(lua_State* L);
     static int UI_GetSize(lua_State* L);
+    static int UI_SetImageUVs(lua_State* L);
+    static int UI_GetImageUVs(lua_State* L);
+    static int UI_SetImageTexpage(lua_State* L);
+    static int UI_GetImageTexpage(lua_State* L);
+    static int UI_SetImageClut(lua_State* L);
+    static int UI_GetImageClut(lua_State* L);
     static int UI_SetProgressColors(lua_State* L);
     static int UI_GetElementType(lua_State* L);
     static int UI_GetElementCount(lua_State* L);
