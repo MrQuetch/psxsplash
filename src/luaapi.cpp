@@ -627,6 +627,9 @@ void LuaAPI::RegisterAll(psyqo::Lua& L, SceneManager* scene, CutscenePlayer* cut
     L.push(UI_DrawTriangle);
     L.setField(-2, "DrawTriangle");
 
+    L.push(UI_DrawPixel);
+    L.setField(-2, "DrawPixel");
+
     L.setGlobal("UI");
 
     // ========================================================================
@@ -3794,6 +3797,68 @@ int LuaAPI::UI_DrawTriangle(lua_State* L) {
     thisTri.setColorC(psyqo::Color{ r3, g3, b3 });
 
     gpu.sendPrimitive(thisTri);
+
+    return 0;
+}
+
+// parameters: UI_DrawPixel(X, Y, {red, green, blue})
+// This is a heavy function and should only be used sparingly
+// Can be useful for replacing colors of a CLUT with your own
+int LuaAPI::UI_DrawPixel(lua_State* L) {
+    psyqo::Lua lua(L);
+    if (!s_uiSystem || !lua.isNumber(1) || !lua.isNumber(2) || !lua.isTable(3)) return 0;
+
+    uint16_t X = static_cast<uint16_t>(lua.toNumber(1));
+    uint16_t Y = static_cast<uint16_t>(lua.toNumber(2));
+
+    // get index 1 from table 3
+    lua.rawGetI(3, 1);
+    int colR = (int)lua.checkNumber(-1);
+    lua.pop();
+
+    lua.rawGetI(3, 2);
+    int colG = (int)lua.checkNumber(-1);
+    lua.pop();
+
+    lua.rawGetI(3, 3);
+    int colB = (int)lua.checkNumber(-1);
+    lua.pop();
+
+    auto& gpu = Renderer::GetInstance().getGPU();
+
+    // Set a region to plot the pixel
+    psyqo::Rect region = { .pos = {{.x = static_cast<int16_t>(X), .y = static_cast<int16_t>(Y)}}, .size = {{.w = 1, .h = 1}} };
+    psyqo::Prim::VRAMUpload upload;
+    upload.region = region;
+    gpu.sendPrimitive(upload);
+
+    // Clamp colors first
+    if (colR < 0)
+        colR = 0;
+    else if (colR > 255)
+        colR = 255;
+
+    if (colG < 0)
+        colG = 0;
+    else if (colG > 255)
+        colG = 255;
+
+    if (colB < 0)
+        colB = 0;
+    else if (colB > 255)
+        colB = 255;
+
+    // Perform color conversion second
+    uint16_t color =
+        ((colB >> 3) << 10) |
+        ((colG >> 3) << 5) |
+        (colR >> 3);
+
+    gpu.sendRaw(color);
+
+    // Flush the region after plotting the pixel
+    psyqo::Prim::FlushCache fc;
+    gpu.sendPrimitive(fc);
 
     return 0;
 }
