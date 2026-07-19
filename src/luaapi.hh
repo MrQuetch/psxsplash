@@ -533,6 +533,8 @@ private:
     static int UI_DrawLine(lua_State* L);
     static int UI_DrawTriangle(lua_State* L);
     
+    static int UI_DrawPixel(lua_State* L);
+
     // ========================================================================
     // PLAYER API - Controlling the PsxPlayer
     // ========================================================================
